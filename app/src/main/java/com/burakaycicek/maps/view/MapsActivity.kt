@@ -1,6 +1,7 @@
-package com.burakaycicek.maps
+package com.burakaycicek.maps.view
 
 import android.Manifest
+import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.location.Location
@@ -8,11 +9,14 @@ import android.location.LocationListener
 import android.location.LocationManager
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
+import android.view.View
 import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.room.Room
+import com.burakaycicek.maps.R
 
 import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.GoogleMap
@@ -21,9 +25,15 @@ import com.google.android.gms.maps.SupportMapFragment
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.MarkerOptions
 import com.burakaycicek.maps.databinding.ActivityMapsBinding
+import com.burakaycicek.maps.model.Place
+import com.burakaycicek.maps.roomdb.PlaceDao
+import com.burakaycicek.maps.roomdb.PlaceDatabase
 import com.google.android.material.snackbar.Snackbar
+import io.reactivex.rxjava3.android.schedulers.AndroidSchedulers
+import io.reactivex.rxjava3.disposables.CompositeDisposable
+import io.reactivex.rxjava3.schedulers.Schedulers
 
-class MapsActivity : AppCompatActivity(), OnMapReadyCallback {
+class MapsActivity : AppCompatActivity(), OnMapReadyCallback , GoogleMap.OnMapLongClickListener{
 
     private lateinit var mMap: GoogleMap
     private lateinit var binding: ActivityMapsBinding
@@ -32,6 +42,11 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback {
     private lateinit var permissionLauncher : ActivityResultLauncher<String>
     private lateinit var sharedPreferences : SharedPreferences
     var trackBoolean : Boolean? = null
+    private var selectedLatitude : Double? = null
+    private var selectedLongitude : Double? = null
+    private lateinit var  db : PlaceDatabase
+    private lateinit var placeDao : PlaceDao
+    val compositeDisposable = CompositeDisposable()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -48,10 +63,20 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback {
 
         sharedPreferences = this.getSharedPreferences("com.burakaycicek.maps", MODE_PRIVATE)
         trackBoolean = false
+
+        selectedLatitude =0.0
+        selectedLongitude = 0.0
+
+        db = Room.databaseBuilder(applicationContext,PlaceDatabase::class.java,"Places")
+            //.allowMainThreadQueries()
+            .build()
+
+        placeDao = db.placeDao()
     }
 
     override fun onMapReady(googleMap: GoogleMap) {
         mMap = googleMap
+        mMap.setOnMapLongClickListener(this)
 
         //casting
         locationManager = this.getSystemService(LOCATION_SERVICE) as LocationManager
@@ -112,4 +137,48 @@ class MapsActivity : AppCompatActivity(), OnMapReadyCallback {
             }
         }
     }
+
+    override fun onMapLongClick(p0: LatLng) {
+
+        mMap.clear()
+
+        mMap.addMarker(MarkerOptions().position(p0))
+        selectedLatitude = p0.latitude
+        selectedLongitude = p0.longitude
+
+    }
+
+    fun save (view : View){
+
+        //Main Thread UI, Default -> CPU, IO Thread Internet/Database
+
+        if (selectedLatitude != null && selectedLongitude != null){
+            val place = Place(binding.placeText.text.toString(),selectedLatitude!!,selectedLongitude!!)
+            compositeDisposable.add(
+                placeDao.insert(place)
+                    .subscribeOn(Schedulers.io())
+                    .observeOn(AndroidSchedulers.mainThread())
+                    .subscribe(this::handleResponse)
+
+            )
+        }
+    }
+
+    private  fun handleResponse(){
+        val intent = Intent(this,MainActivity::class.java)
+        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        startActivity(intent)
+    }
+
+
+    fun delete (view : View){
+
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+
+        compositeDisposable.clear()
+    }
+
 }
